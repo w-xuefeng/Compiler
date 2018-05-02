@@ -17,10 +17,9 @@
         <mu-breadcrumb>
           <mu-raised-button @click="cffx" label="词法分析"/>
           <mu-raised-button @click="yffx" label="语法分析"/>
-          <mu-raised-button @click="cffx" label="语义分析"/>
-          <mu-raised-button @click="cffx" label="中间代码" primary/>
-          <mu-raised-button @click="cffx" label="代码优化"/>
-          <mu-raised-button @click="cffx" label="目标代码" primary/>
+          <mu-raised-button @click="showPreList" label="预测语法分析表"/>
+          <mu-raised-button @click="midCode" label="中间代码" primary/>
+          <mu-raised-button @click="showSnackbar('敬请期待', 2000)" label="目标代码" primary/>
           <mu-raised-button @click="clearConsole" label="清空控制台"/>
         </mu-breadcrumb>
       </div>
@@ -39,6 +38,23 @@
       </mu-dialog>
       <mu-snackbar v-if="snackbar.is" :message="snackbar.message" action="关闭" @actionClick="hideSnackbar" @close="hideSnackbar"/>
     </div>
+    <mu-drawer :open="drawer.open" :docked="drawer.docked" @close="drawertoggle()" width="100%" class="drawer">
+      <h1>预测语法分析表</h1>
+      <table class="table" cellpadding="0" cellspacing="0" style="width:100%;">
+        <tr style="width:100%;">
+          <td>T/NT</td>
+          <td v-for="(T, index) in preParseTable.tor" :key="index">{{T}}</td>
+        </tr>
+        <tr v-for="(NT, index) in preParseTable.ntor" :key="index" style="width:100%;">
+          <td>{{NT}}</td>
+          <td v-for="(pro, indexp) in preParseTable.tor" :key="indexp">
+            <span v-if="preParseTable.product[index][indexp] !== 'x'">{{preParseTable.product[index][indexp].left}} → {{preParseTable.product[index][indexp].right.join('')}}</span>
+            <span v-if="preParseTable.product[index][indexp] === 'x'">x</span>
+          </td>
+        </tr>
+      </table>
+      <mu-float-button icon="close" v-if="drawer.docked" @click.native="drawer.open = false" style="position:fixed;right:3em;top:3em;"/>
+    </mu-drawer>
     <ul class="footerInfor" ref="cnsoleT">
       <li v-for="(item, index) in consoleTai" :key="index" v-html="item">{{item}}</li>
     </ul>
@@ -46,31 +62,53 @@
 </template>
 <script>
 import editDiv from '@/components/editDiv.vue'
+import Parse from '../assets/parselib/parse.js'
 export default {
   data () {
     return {
       activeTab: 'tab1',
-      consoleTai: ['<span style="color:#fff;">这是控制台</span>'],
+      PARSE: '',
+      consoleTai: ['<span style="color:#fff;">这是控制台</span>'], // 控制台信息
       dialog: {
-        is: false,
-        title: '',
-        content: []
+        is: false, // 是否显示弹窗
+        title: '', // 弹窗标题
+        content: [] // 弹窗内容
+      },
+      drawer: {
+        open: false,
+        docked: true
+      },
+      preParseTable: {
+        tor: [],
+        ntor: [],
+        product: [[{
+          left: '',
+          right: ''
+        }]]
       },
       snackbar: {
-        is: false,
-        message: ''
+        is: false, // 是否显示提示
+        message: '' // 提示内容
       },
       textarea: {
-        rows: 0,
-        height: '500',
-        lineCount: 1,
-        lineCountString: 1,
-        MAXLINE: 10000,
-        testCode: '#include "stdio.h"\n#include "stdlib.h"\n\nint mian(){\n    int a = 20, b = 30;\n    printf("%d\\n", a + b);\n    return 0;\n}',
-        code: 'double max(double a, double b) {\n    return a > b ? a : b ;\n}'
+        rows: 0, // 编辑器最大行数
+        height: '500', // 编辑器高度
+        lineCount: 1, // 编辑器代码行数
+        lineCountString: 1, // 代码行数字符串
+        MAXLINE: 10000, // 允许的最大代码行数
+        code: `void main(){
+  int a = 10; //这是一行注释
+  int b = 20, c = 30;
+  int d = a + b * c;
+}
+/*
+* int 123abc = 123;
+* 这是多行注释
+*/
+` // 代码内容 测试代码
       },
       lex: {
-        keyword: {
+        keyword: { // 系统关键字
           c: [
             'int', 'long', 'short', 'float', 'double', 'char', 'unsigned', 'signed',
             'const', 'void', 'volatile', 'enum', 'struct', 'union', 'if', 'else',
@@ -79,13 +117,110 @@ export default {
           ]
         }
       },
-      codeLexPrase: {
+      mulitRelop: ['<=', '>=', '==', '!=', '<>'], // 多位关系运算符数组
+      codeLexPrase: { // 词法分析器存储用户自定义标识符的数组
         id: []
       },
-      lexResAll: {
-        binGroup: [],
-        tokenArray: [],
-        valueArray: []
+      lexResAll: { // 词法分析结果
+        binGroup: [], // 二元组
+        tokenArray: [], // token
+        valueArray: [] // 属性值
+      },
+      grammerParse: { // 文法规则
+        grammer: [{ // S -> void id(){A}
+          left: ['S'],
+          right: ['void', 'id', '(', ')', '{', 'A', '}']
+        }, { // X -> YZ;
+          left: ['X'],
+          right: ['Y', 'Z', ';']
+        }, { // Y -> int|float|double|char|bool
+          left: ['Y'],
+          right: ['int', '|', 'float', '|', 'double', '|', 'char', '|', 'bool']
+        }, { // Z -> UZ’
+          left: ['Z'],
+          right: ['U', 'Z’']
+        }, { // Z’ -> ,Z|ε
+          left: ['Z’'],
+          right: [',', 'Z', '|', 'ε']
+        }, { // U -> idU’
+          left: ['U'],
+          right: ['id', 'U’']
+        }, { // U’ -> =L|ε
+          left: ['U’'],
+          right: ['=', 'L', '|', 'ε']
+        }, { // R -> id=L;
+          left: ['R'],
+          right: ['id', '=', 'L']
+        }, { // L - >TL’
+          left: ['L'],
+          right: ['T', 'L’']
+        }, { // L’ -> +L|-L|ε
+          left: ['L’'],
+          right: ['+', 'L', '|', '-', 'L', '|', 'ε']
+        }, { // T -> FT’
+          left: ['T'],
+          right: ['F', 'T’']
+        }, { // T’ -> *T|/T|ε
+          left: ['T’'],
+          right: ['*', 'T', '|', '/', 'T', '|', 'ε']
+        }, { // F -> (L)
+          left: ['F'],
+          right: ['(', 'L', ')']
+        }, { // F -> id|num
+          left: ['F'],
+          right: ['id', '|', 'num']
+        }, { // O -> ++|--|ε
+          left: ['O'],
+          right: ['++', '|', '--', '|', 'ε']
+        }, { // Q -> idO|ε
+          left: ['Q'],
+          right: ['id', 'O', '|', 'ε']
+        }, { // E -> HE’
+          left: ['E'],
+          right: ['H', 'E’']
+        }, { // E’ -> &&E|ε
+          left: ['E’'],
+          right: ['&&', 'E', '|', 'ε']
+        }, { // H -> GH
+          left: ['H'],
+          right: ['G', 'H']
+        }, { // H’ -> ||H
+          left: ['H’'],
+          right: ['||', 'H']
+        }, { // H’ -> ε
+          left: ['H’'],
+          right: ['ε']
+        }, { // G -> FDF
+          left: ['G'],
+          right: ['F', 'D', 'F']
+        }, { // D -> <|>|==|!=
+          left: ['D'],
+          right: ['<', '|', '>', '|', '==', '!=']
+        }, { // G -> (E)
+          left: ['G'],
+          right: ['(', 'E', ')']
+        }, { // G -> !E
+          left: ['G'],
+          right: ['!', 'E']
+        }, { // B -> if (E){A}else{A}
+          left: ['B'],
+          right: ['if', '(', 'E', ')', '{', 'A', '}', 'else', '{', 'A', '}']
+        }, { // B -> while(E){A}
+          left: ['B'],
+          right: ['while', '(', 'E', ')', '{', 'A', '}']
+        }, { // B->for(YZ;G;Q){A}
+          left: ['B'],
+          right: ['for', '(', 'Y', 'Z', ';', 'G', ';', 'Q', ')', '{', 'A', '}']
+        }, { // A -> CA
+          left: ['A'],
+          right: ['C', 'A']
+        }, { // C -> X|B|R
+          left: ['C'],
+          right: ['X', '|', 'B', '|', 'R']
+        }, { // A -> ε
+          left: ['A'],
+          right: ['ε']
+        }]
       }
     }
   },
@@ -94,10 +229,10 @@ export default {
       this.activeTab = val
     },
     showCourseDesign () {
-      this.openDialog(`编译原理 课程设计内容`, ['1.词法分析器', '2.语法分析器'])
+      this.openDialog(`编译原理 课程设计内容`, ['1.词法分析器', '2.语法分析器', '3.中间代码生成'])
     },
     showTeamInfor () {
-      this.openDialog(`计科1501 小组成员信息`, ['王雪峰 20154845', '郑岩培 20154843', '凌秀雯 2015484x'])
+      this.openDialog(`计科1501 小组成员信息`, ['王雪峰 20154845', '郑岩培 20154843', '凌秀雯 20154834'])
     },
     openDialog (title, content) {
       this.dialog.is = true
@@ -108,6 +243,14 @@ export default {
       this.dialog.is = false
       this.dialog.title = ''
       this.dialog.content = []
+    },
+    drawertoggle (flag) {
+      this.drawer.open = !this.drawer.open
+      this.drawer.docked = !flag
+    },
+    showPreList () {
+      this.preParseTable = this.PARSE.PPT
+      this.drawertoggle()
     },
     copyDialogContent () {
       let input = document.createElement('input')
@@ -140,6 +283,9 @@ export default {
         this.scrollToBottom(this.$refs.cnsoleT)
       })
     },
+    addColorTextConsole (color, content) {
+      this.addConsole(`<span style="color:${color};">${content}</span>`)
+    },
     clearConsole () {
       this.consoleTai = ['<span style="color:#fff;">这是控制台</span>']
     },
@@ -158,15 +304,18 @@ export default {
       this.snackbar.is = false
       if (this.snackTimer) clearTimeout(this.snackTimer)
     },
+    delRemark (str) {
+      return str.replace(/\/\*[\s\S]*\*\/|\/\/.*/g, ``)
+    },
     tirm (str) {
       return str.replace(/(^\s*)|(\s*$)/g, ``)
     },
-    setId (str) {
+    setId (str) { // 存储id
       if (this.getId(str) === -1) {
         this.codeLexPrase.id.push(str)
       }
     },
-    getId (str) {
+    getId (str) { // 获取id的地址
       let res = -1
       for (let index = 0, l = this.codeLexPrase.id.length; index < l; index++) {
         if (str === this.codeLexPrase.id[index]) {
@@ -176,89 +325,119 @@ export default {
       }
       return res
     },
-    clearId () {
+    clearId () { // 清除存储的id
       this.codeLexPrase.id = []
     },
-    isSysKey (key) {
-      let res = false
-      for (let i = 0, l = this.lex.keyword.c.length; i < l; i++) {
-        if (this.lex.keyword.c[i] === key) {
-          res = true
-          break
-        }
-      }
-      return res
+    isSysKey (key) { // 判断是否是系统关键字
+      return this.inArray(key, this.lex.keyword.c)
     },
-    isId (str) {
+    isId (str) { // 判断是否是用户自定义标识符
       return /^[A-Za-z_][A-Za-z0-9_]*$/.test(str)
     },
-    isNum (str) {
+    isNum (str) { // 判断是否是数字
       return !isNaN(str)
     },
-    isZyzf (str) {
+    isRelop (str) { // 判断是否是关系运算符
+      return /([><!]=?|==)/.test(str)
+    },
+    isAssign (str) { // 判断是否是赋值符
+      return /=/.test(str) && str === '='
+    },
+    isZyzf (str) { // 判断是否是转义字符
       return /(\\n|\\t|(%d)|(%f)|(%lf))+/.test(str)
     },
-    isSeparator (str) {
-      return /\+|-|\*|\/|=|!|==|===|!=|!==|\(|\)|\{|\}|\[|\]|,|;|\?|:|"|'|#|\.|\s|\n|<|>|!|%|&|\||&&|\|\|/.test(str)
+    isSeparator (str) { // 判断是否是分隔符
+      return /\+|-|\*|\/|=|!|!=|!==|\(|\)|\{|\}|\[|\]|,|;|\?|:|"|'|#|\.|\s|\n|<|>|!|%|&|\||&&|\|\|/.test(str)
     },
-    oneLineParse (code, line) {
-      let codeArray = code.split('')
-      let lexArray = []
-      let curLex = []
-      for (let i = 0, j = 0, l = codeArray.length; i < l; i++) {
-        if (codeArray[i] !== '\n' && this.tirm(codeArray[i]) !== ``) {
-          curLex.push(codeArray[i])
-        }
-        if (this.isSeparator(codeArray[i])) {
-          if (codeArray[i] !== '\n' && this.tirm(codeArray[i]) !== ``) {
-            lexArray[j + 1] = curLex.pop()
-            lexArray[j] = curLex.join('')
-            j += 2
-          } else {
-            lexArray[j] = curLex.join('')
-            j++
-          }
-          curLex = []
+    inArray (search, array) {
+      for (let i in array) {
+        if (array[i] === search) {
+          return true
         }
       }
-      let lexRes = []
+      return false
+    },
+    /*
+    * @ function 对一行代进行码分析
+    * @ param code 一行代码
+    * @ param line 代码所在行号
+    * @ return lexRes or false 若无词法错误，返回分析结果lexRes，否则返回false且显示报错
+    */
+    oneLineParse (code, line) {
+      let codeArray = code.split('') // 按字符分割代码到数组
+      let lexArray = [] // 完整的词素数组
+      let curLex = [] // 当前分析的词素
+      for (let i = 0, j = 0, l = codeArray.length; i < l; i++) {
+        if (codeArray[i] !== '\n' && this.tirm(codeArray[i]) !== ``) {
+          curLex.push(codeArray[i]) // 将字符拼接为词素
+        }
+        if (this.isSeparator(codeArray[i])) { // 当前字符为分隔符
+          if (codeArray[i] !== '\n' && this.tirm(codeArray[i]) !== ``) { // 当前字符不为空格和换行符
+            if (this.inArray(codeArray[i] + codeArray[i + 1], this.mulitRelop)) { // 当前字符和下一字符组成多位关系运算符
+              curLex.push(codeArray[i + 1]) // 将下一字符压进数组
+              lexArray[j] = curLex.join('') // 将当前字符数组拼接为一个词素
+              j++ // 词素数组后移
+              i++ // 分析光标后移
+            } else {
+              lexArray[j + 1] = curLex.pop() // 将最后一个字符（分隔符）弹出当前分析词素的数组且作为下一个词素
+              lexArray[j] = curLex.join('') // 将当前字符数组拼接为一个词素
+              j += 2 // 词素数组后移2位
+            }
+          } else {
+            lexArray[j] = curLex.join('') // 将当前字符数组拼接为一个词素
+            j++ // 词素数组后移
+          }
+          curLex = [] // 一轮分析完成清空当前分析词素数组
+        }
+      }
+      let lexRes = [] // 词法分析结果
       for (let i = 0; i < lexArray.length; i++) {
         if (this.tirm(lexArray[i]) === ``) {
-          lexArray.splice(i, 1)
+          lexArray.splice(i, 1) // 删除词素数组中的空词素
           i = i - 1
         }
       }
       for (let i = 0, l = lexArray.length; i < l; i++) {
         if (this.isSysKey(lexArray[i])) {
-          lexRes[i] = {
+          lexRes[i] = { // 系统关键字二元组对象
             token: lexArray[i],
             value: `-`
           }
         } else if (this.isId(lexArray[i])) {
           this.setId(lexArray[i])
-          lexRes[i] = {
+          lexRes[i] = { // 用户自定义标识符二元组对象
             token: `id`,
             value: this.getId(lexArray[i])
           }
         } else if (this.isNum(lexArray[i])) {
-          lexRes[i] = {
+          lexRes[i] = { // 数字二元组对象
             token: `num`,
             value: lexArray[i]
           }
+        } else if (this.isRelop(lexArray[i])) {
+          lexRes[i] = { // 关系运算符二元组对象
+            token: lexArray[i], // relop
+            value: lexArray[i]
+          }
+        } else if (this.isAssign(lexArray[i])) {
+          lexRes[i] = { // 赋值符二元组对象
+            token: lexArray[i], // assign
+            value: lexArray[i]
+          }
         } else if (this.isSeparator(lexArray[i])) {
-          lexRes[i] = {
-            token: `Separator`,
+          lexRes[i] = { // 分隔符二元组对象
+            token: lexArray[i],
             value: lexArray[i]
           }
         } else if (this.isZyzf(lexArray[i])) {
-          lexRes[i] = {
+          lexRes[i] = { // 转义字符二元组对象
             token: `Zyzf`,
             value: lexArray[i]
           }
-        } else {
+        } else { // 出现词法错误
           this.showSnackbar(`出现词法错误 [${line + 1}]`, 5000)
-          this.addConsole(`<span style="color:red;">词法错误 [${line + 1}]：${lexArray[i]}</span>`)
-          return
+          this.addColorTextConsole('red', `词法错误 [${line + 1}]：${lexArray[i]}`)
+          return false
         }
       }
       return lexRes
@@ -270,19 +449,25 @@ export default {
       this.lexResAll.valueArray = []
     },
     lexParse () {
+      let code = this.tirm(this.delRemark(this.$refs.mainTextArea.$el.innerText))
+      this.$refs.mainTextArea.$el.innerText = code
+      this._textareaBind()
       this.highLighting()
-      let code = this.$refs.mainTextArea.$el.innerText
       let codeLine = code.split('\n')
       let lexRes = []
       this.initLexParse()
       for (let line = 0, l = codeLine.length; line < l; line++) {
         lexRes[line] = this.oneLineParse(codeLine[line], line)
+        if (!lexRes[line]) {
+          return false
+        }
         for (let i = 0; i < lexRes[line].length; i++) {
-          this.lexResAll.binGroup.push(`<` + lexRes[line][i].token + `,` + lexRes[line][i].value + `>`)
+          this.lexResAll.binGroup.push(`<${lexRes[line][i].token}, ${lexRes[line][i].value}>`)
           this.lexResAll.tokenArray.push(lexRes[line][i].token)
           this.lexResAll.valueArray.push(lexRes[line][i].value)
         }
       }
+      return true
     },
     htmlspecialchar (strOrArray) {
       let content = this.flatten([strOrArray])
@@ -295,18 +480,85 @@ export default {
     },
     cffx () {
       this.addConsole('开始词法分析')
-      this.lexParse()
-      this.showSnackbar('词法分析完成', 2000)
-      this.addConsole('<span style="color:#fff;">词法分析完成 返回二元组如下：</span>')
-      this.addConsole(this.htmlspecialchar(this.lexResAll.binGroup))
-      // this.openDialog('词法分析返回结果', this.lexResAll.binGroup)
+      if (this.lexParse()) {
+        this.showSnackbar('词法分析完成', 2000)
+        this.addColorTextConsole('#fff', '词法分析完成 返回二元组如下：')
+        this.addConsole(this.htmlspecialchar(this.lexResAll.binGroup))
+        console.dir(this.lexResAll.binGroup)
+      }
+    },
+    parseRules () {
+      let grammerRules = []
+      for (let i = 0; i < this.grammerParse.grammer.length; i++) {
+        grammerRules[i] = `${this.grammerParse.grammer[i].left[0]} → ${this.grammerParse.grammer[i].right.join('')}`
+      }
+      return grammerRules
     },
     yffx () {
-      if (this.lexResAll.tokenArray.length === 0) {
-        this.lexParse()
+      if (!this.lexParse()) {
+        return {status: false}
       }
+      this.addConsole('开始语法分析')
+      this.addColorTextConsole('#fff', '使用如下文法规则：')
+      this.addConsole(this.parseRules())
       let tokenStr = this.lexResAll.tokenArray.join(' ')
-      console.dir(tokenStr)
+      let parse = this.PARSE
+      parse.tokenArray = this.lexResAll.tokenArray
+      parse.tokenValue = this.lexResAll.valueArray
+      console.dir(parse.PPT)
+      console.dir(parse.NT)
+      this.preParseTable = parse.PPT
+      this.addColorTextConsole('#fff', '文法的 First 集如下:')
+      for (let i = 0; i < parse.nonTerminator.length; i++) {
+        console.dir(`First(${parse.NT[i].ntor}) = {${parse.NT[i].FirstArray.join('，')}}`)
+        this.addConsole(`First(${parse.NT[i].ntor}) = {${parse.NT[i].FirstArray.join('，')}}`)
+      }
+      this.addColorTextConsole('#fff', '文法的 Follow 集如下:')
+      for (let i = 0; i < parse.nonTerminator.length; i++) {
+        console.dir(`Follow(${parse.NT[i].ntor}) = {${parse.NT[i].Follow.join('，')}}`)
+        this.addConsole(`Follow(${parse.NT[i].ntor}) = {${parse.NT[i].Follow.join('，')}}`)
+      }
+      let res = parse.parseToken()
+      if (res.status) {
+        this.showSnackbar('语法分析完成', 2000)
+        this.addColorTextConsole('#fff', '语法分析完成 返回如下:')
+        this.addColorTextConsole('green', 'token序列：')
+        this.addConsole(tokenStr)
+        this.addColorTextConsole('green', '分析输出产生式')
+        for (let i = 0; i < res.output.length; i++) {
+          this.addConsole(`${res.output[i].left} → ${res.output[i].right.join('')}`)
+        }
+      } else {
+        console.dir(res)
+        if (res.errorType === 2) {
+          this.showSnackbar('发生语法错误', 2000)
+          let error = this.ifIdGet(res.error[0].token, res.error[0].value)
+          if (res.error.length > 1) {
+            error = `${this.ifIdGet(res.error[1].token, res.error[1].value)} ${error} ${this.ifIdGet(res.error[2].token, res.error[2].value)}`
+          }
+          this.addColorTextConsole('red', `发生语法错误： " ${error} "`)
+        } else {
+          this.showSnackbar(`语法分析出现错误 ErrorType: ${res.errorType}`, 2000)
+          this.addColorTextConsole('red', `语法分析出现错误 ErrorType: ${res.errorType}`)
+        }
+      }
+      return res
+    },
+    midCode () {
+      let res = this.yffx()
+      if (!res.status) {
+        return
+      }
+      console.dir(res.output)
+      this.showSnackbar('敬请期待', 2000)
+    },
+    ifIdGet (token, value) {
+      if (token === 'id') {
+        return this.codeLexPrase.id[value]
+      } else if (this.isSysKey(token)) {
+        return token
+      }
+      return value
     },
     getTextRows () {
       let contentHeight = window.screen.availHeight - this.$refs.head.offsetHeight - 320
@@ -419,6 +671,8 @@ export default {
     'processData': 'scrollToBottom'
   },
   mounted () {
+    this.PARSE = new Parse(['$'], [''], this.grammerParse.grammer)
+    this.PARSE.getSet()
     this.textarea.height = this.getTextRows().height
     this.bindEvent()
     this.highLighting()
@@ -557,6 +811,23 @@ export default {
 
 #mainTextArea::-webkit-scrollbar-resizer{
   background:#FF0BEE;
+}
+
+.drawer{
+  padding: 100px 10px 10px;
+  text-align: center;
+}
+
+.table{
+  border: 1px solid #000;
+  margin-bottom: 3px;
+}
+.table >tr>td {
+  border: 1px solid #000;
+  min-width: 2em;
+  min-height: 2em;
+  text-align: center;
+  font-size: 10px;
 }
 
 .footerInfor{
