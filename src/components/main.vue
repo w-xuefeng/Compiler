@@ -63,6 +63,7 @@
 <script>
 import editDiv from '@/components/editDiv.vue'
 import Parse from '../assets/parselib/parse.js'
+import Trans from '../assets/parselib/midcode.js'
 export default {
   data () {
     return {
@@ -96,14 +97,20 @@ export default {
         lineCount: 1, // 编辑器代码行数
         lineCountString: 1, // 代码行数字符串
         MAXLINE: 10000, // 允许的最大代码行数
-        code: `void main(){
+        code: `A = B + C * D;
+Z = - Y * (M + N) + X;
+/*void main(){
   int a = 10; //这是一行注释
   int b = 20, c = 30;
   int d = a + b * c;
+  double pi = 3.14;
+  double r = 5;
+  double area = pi * r * r;
 }
-/*
+
 * int 123abc = 123;
 * 这是多行注释
+* 这里的任何错误将被忽略
 */
 ` // 代码内容 测试代码
       },
@@ -337,6 +344,9 @@ export default {
     isNum (str) { // 判断是否是数字
       return !isNaN(str)
     },
+    isFloat (str) { // 判断是否为小数
+      return /^\d+(\.\d+)?$/.test(str)
+    },
     isRelop (str) { // 判断是否是关系运算符
       return /([><!]=?|==)/.test(str)
     },
@@ -378,6 +388,8 @@ export default {
               lexArray[j] = curLex.join('') // 将当前字符数组拼接为一个词素
               j++ // 词素数组后移
               i++ // 分析光标后移
+            } else if (codeArray[i] === '.' && this.isNum(codeArray[i - 1])) { // 若当前字符为小数点，且前一位是数字，则将小数点压如数组
+              continue
             } else {
               lexArray[j + 1] = curLex.pop() // 将最后一个字符（分隔符）弹出当前分析词素的数组且作为下一个词素
               lexArray[j] = curLex.join('') // 将当前字符数组拼接为一个词素
@@ -408,6 +420,11 @@ export default {
           lexRes[i] = { // 用户自定义标识符二元组对象
             token: `id`,
             value: this.getId(lexArray[i])
+          }
+        } else if (this.isFloat(lexArray[i])) {
+          lexRes[i] = { // 小数字二元组对象
+            token: `num`,
+            value: lexArray[i]
           }
         } else if (this.isNum(lexArray[i])) {
           lexRes[i] = { // 数字二元组对象
@@ -545,12 +562,70 @@ export default {
       return res
     },
     midCode () {
-      let res = this.yffx()
-      if (!res.status) {
-        return
+      this.midCreate()
+    },
+    midCreate () {
+      let code = this.tirm(this.delRemark(this.$refs.mainTextArea.$el.innerText))
+      this.$refs.mainTextArea.$el.innerText = code
+      this._textareaBind()
+      this.highLighting()
+      let codeLine = code.split('\n')
+      let Res = []
+      for (let line = 0, l = codeLine.length; line < l; line++) {
+        Res[line] = this.midCreateOneLine(codeLine[line])
+        this.addConsole(Res[line])
+        console.dir(Res[line])
       }
-      console.dir(res.output)
-      this.showSnackbar('敬请期待', 2000)
+      return true
+    },
+    midCreateOneLine (input) {
+      let codeArray = input.split('')
+      let n = 1
+      let tempOut = []
+      let number = []
+      let trans = new Trans(codeArray)
+      let output = trans.justDoIt()
+      console.dir(output)
+      for (let i = 0; i < output.length; i++) {
+        let t = output[i]
+        if (t === '+') {
+          let n1 = number.pop()
+          let n2 = number.pop()
+          let n3 = `t${n}`
+          n++
+          number.push(n3)
+          tempOut.push(`${n - 1}.  ( +, ${n2}, ${n1}, ${n3})`)
+        } else if (t === '-') {
+          let n1 = number.pop()
+          let n3 = `t${n}`
+          n++
+          number.push(n3)
+          tempOut.push(`${n - 1}.  ( -, ${n1},  , ${n3})`)
+        } else if (t === '*') {
+          let n1 = number.pop()
+          let n2 = number.pop()
+          let n3 = `t${n}`
+          n++
+          number.push(n3)
+          tempOut.push(`${n - 1}.  ( *, ${n2}, ${n1}, ${n3})`)
+        } else if (t === '/') {
+          let n1 = number.pop()
+          let n2 = number.pop()
+          let n3 = `t${n}`
+          n++
+          number.push(n3)
+          tempOut.push(`${n - 1}.  ( /, ${n2}, ${n1}, ${n3})`)
+        } else if (/[a-zA-Z0-9=]/.test(t)) {
+          number.push(t)
+        }
+      }
+      console.log()
+      let last2 = number.pop()
+      number.pop()
+      let last1 = number.pop()
+      n++
+      tempOut.push(`${n - 1}.  ( =, ${last2},  , ${last1})`)
+      return tempOut
     },
     ifIdGet (token, value) {
       if (token === 'id') {

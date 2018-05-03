@@ -73,14 +73,12 @@ export default class Parse {
   set setTokenArray (tokenArray) {
     this.tokenArray = tokenArray
   }
-
   get getTokenValue () {
     return this.tokenValue
   }
   set setTokenValue (tokenValue) {
     this.tokenValue = tokenValue
   }
-
   get getGrammer () {
     return this.grammer
   }
