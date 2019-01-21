@@ -40,7 +40,7 @@ export default{
   }
 }
 </script>
-<style lang="scss" rel="stylesheet/scss">
+<style lang="less">
 .edit-div {
   width: 100%;
   height: 100%;
@@ -51,7 +51,6 @@ export default{
   white-space: pre-wrap;
   text-align: left;
   &[contenteditable=true]{
-    user-modify: read-write-plaintext-only;
     &:empty:before {
       content: attr(placeholder);
       display: block;

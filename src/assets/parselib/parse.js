@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /*
 *
 * @ className： Paese 语法分析器 求文法的first集和follow集 构建预测文法分析表 并分析所传字符串

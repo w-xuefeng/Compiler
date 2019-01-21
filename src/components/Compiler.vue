@@ -61,9 +61,10 @@
   </div>
 </template>
 <script>
-import editDiv from '@/components/editDiv.vue'
-import Parse from '../assets/parselib/parse.js'
-import Trans from '../assets/parselib/midcode.js'
+/* eslint-disable no-console */
+import editDiv from './editDiv.vue'
+import Parse from '@/assets/parselib/parse.js'
+import Trans from '@/assets/parselib/midcode.js'
 export default {
   data () {
     return {
@@ -882,6 +883,10 @@ Z = - Y * (M + N) + X;
 #mainTextArea::-webkit-scrollbar-corner{
   background:none;
   height: 0px;
+}
+
+.breadcrumb button:not(:last-child) {
+  margin-right: 5px;
 }
 
 #mainTextArea::-webkit-scrollbar-resizer{

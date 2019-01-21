@@ -1,20 +1,16 @@
 <template>
   <div id="app">
-    <router-view/>
+    <Compiler></Compiler>
   </div>
 </template>
 
 <script>
+import Compiler from './components/Compiler.vue'
+
 export default {
-  name: 'App'
+  name: 'app',
+  components: {
+    Compiler
+  }
 }
 </script>
-
-<style>
-  #app {
-    font-family: 'Avenir', Helvetica, Arial, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    height: 100%;
-  }
-</style>
