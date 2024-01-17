@@ -40,5 +40,4 @@ jobs:
           git config user.email "w-xuefeng@outlook.com"
           git add .
           git commit -am "Feat: Github Action Auto Deploy"
-          git checkout deploy
-          git push --force --quiet "https://${{secrets.token}}@github.com/w-xuefeng/Complier.git" deploy:deploy
+          git push --force --quiet "https://${{secrets.token}}@github.com/w-xuefeng/Complier.git" master:deploy
