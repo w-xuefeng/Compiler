@@ -1,0 +1,43 @@
+name: Deploy
+
+on: 
+  push:
+    branches: 
+      - master
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [16.x]
+
+    steps:
+      - name: 1. git checkout...
+        uses: actions/checkout@v1
+        
+      - name: 2. setup nodejs...
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ matrix.node-version }}
+      
+      - name: 3. install dependences...
+        run: |
+          npm install
+          
+      - name: 4. build
+        run: |
+          npm run build
+          cp ./README.md ./dist/README.md
+
+      - name: 5. deploy 'dist files'
+        run: |
+          cd dist
+          git init
+          git config user.name "w-xuefeng"
+          git config user.email "w-xuefeng@outlook.com"
+          git add .
+          git commit -am "Feat: Github Action Auto Deploy"
+          git checkout deploy
+          git push --force --quiet "https://${{secrets.token}}@github.com/w-xuefeng/Complier.git" deploy:deploy
