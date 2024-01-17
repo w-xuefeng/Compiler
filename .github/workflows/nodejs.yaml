@@ -11,7 +11,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [16.x]
+        node-version: [16.15.1]
 
     steps:
       - name: 1. git checkout...
@@ -24,11 +24,12 @@ jobs:
       
       - name: 3. install dependences...
         run: |
-          npm install
+          npm install -g yarn
+          yarn
           
       - name: 4. build
         run: |
-          npm run build
+          yarn build
           cp ./README.md ./dist/README.md
 
       - name: 5. deploy 'dist files'
